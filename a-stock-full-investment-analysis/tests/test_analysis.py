@@ -139,7 +139,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn("数据采集追踪表", html)
         self.assertIn("报告降级说明", html)
         self.assertNotIn("N/A", html)
-        self.assertNotIn("v3.5.0", html)
+        self.assertIn("v4.0.0", html)
 
     def test_run_multi_still_outputs_comparison_table(self):
         fake_hist = make_kline(60)

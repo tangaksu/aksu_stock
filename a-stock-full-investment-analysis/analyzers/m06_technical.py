@@ -16,7 +16,7 @@ def _calc_rsi(closes: list[float], period: int = 14) -> float | None:
     for prev, current in zip(closes[-period - 1:-1], closes[-period:]):
         diff = current - prev
         gains.append(max(diff, 0))
-        losses.append(abs(min(diff, 0)))
+        losses.append(max(-diff, 0))
     avg_gain = sum(gains) / period
     avg_loss = sum(losses) / period
     if avg_loss == 0:
@@ -62,6 +62,7 @@ def _calc_kdj(highs: list[float], lows: list[float], closes: list[float], period
 
 
 def _sample_period(closes: list[float], step: int) -> list[float]:
+    """按固定步长抽样日线收盘价，近似生成周线/月线序列，并确保最新收盘价被包含。"""
     if not closes:
         return []
     start = (len(closes) - 1) % step

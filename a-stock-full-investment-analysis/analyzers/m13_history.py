@@ -169,7 +169,7 @@ def analyze_history(data: dict) -> ModuleResult:
         prev = closes[idx - 1]
         if dt is None or prev == 0:
             continue
-        quarter = f"Q{((dt.month - 1) // 3) + 1}"
+        quarter = f"Q{((dt.month - 1) // 3) + 1}"  # 将月份 1-12 映射到 Q1-Q4
         seasonal.setdefault(quarter, []).append((closes[idx] - prev) / prev * 100)
         if dt.month in (1, 4, 8, 10):
             report_window_returns.append((closes[idx] - prev) / prev * 100)

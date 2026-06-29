@@ -69,9 +69,9 @@ def calc_trade_levels(price: float | None, ma10: float | None = None, ma20: floa
     """统一计算入场/止损/止盈参数。"""
     if price is None:
         return {
-            "entry_low": ma10,
+            "entry_low": None,
             "entry_high": None,
-            "stop_loss": ma20,
+            "stop_loss": None,
             "take_profit_1": None,
             "take_profit_2": None,
             "take_profit_3": None,

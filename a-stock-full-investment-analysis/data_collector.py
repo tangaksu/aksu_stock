@@ -706,7 +706,7 @@ def fetch_research_reports(code: str) -> list[dict]:
         df = ak.stock_research_report_em(symbol=code)
         if df is None or df.empty:
             return []
-        cutoff = datetime.now() - timedelta(days=183)
+        cutoff = datetime.now() - timedelta(days=183)  # 近6个月研报更能反映当前机构预期
         result = []
         for _, row in df.iterrows():
             raw_date = str(row.get("发布日期", ""))
