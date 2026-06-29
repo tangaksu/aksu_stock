@@ -1,2 +1,2 @@
 # aksu_stock
-q
+qqw
