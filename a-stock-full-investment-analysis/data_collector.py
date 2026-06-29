@@ -3,8 +3,8 @@
 
 数据源优先级:
   1. 腾讯财经（实时行情，最稳定）
-  2. 新浪财经（批量实时行情）
-  3. AKShare — 东方财富 / 同花顺接口（财务、资金、研报等）
+  2. 新浪财经（批量实时行情备用）
+  3. AKShare — 东方财富 / 同花顺接口（财务、资金、研报等；实时行情最终兜底）
   4. 腾讯历史K线（AKShare超时时备用）
 """
 from __future__ import annotations
@@ -216,8 +216,10 @@ def fetch_realtime_eastmoney_batch(codes: list[str]) -> dict[str, dict]:
     """东方财富实时行情（经由 AKShare）。"""
     if not codes:
         return {}
+    ak = _get_akshare()
+    if ak is None:
+        return {}
     try:
-        import akshare as ak
         df = ak.stock_zh_a_spot_em()
         if df is None or df.empty:
             return {}
@@ -338,16 +340,23 @@ def fetch_realtime_sina_batch(codes: list[str]) -> dict[str, dict]:
 
 
 def fetch_realtime(codes: list[str]) -> dict[str, dict]:
-    """统一实时行情入口：东方财富优先，其次新浪，最后腾讯补全。"""
-    out = fetch_realtime_eastmoney_batch(codes)
-    sina_map = fetch_realtime_sina_batch([c for c in codes if c not in out or not _extract_payload(out[c])[0].get("price")])
-    out.update(sina_map)
+    """统一实时行情入口：腾讯财经优先（最稳定），其次新浪，最后东方财富/AKShare补全。"""
+    out: dict[str, dict] = {}
+    # 1. 腾讯财经（逐只，稳定性最高）
     for c in codes:
-        plain, _, _, _ = _extract_payload(out.get(c) or {})
-        if c not in out or not plain.get("price"):
-            q = fetch_realtime_tencent(c)
-            if q:
-                out[c] = q
+        q = fetch_realtime_tencent(c)
+        if q:
+            out[c] = q
+    # 2. 新浪财经批量补全价格缺失的个股
+    missing_sina = [c for c in codes if c not in out or not _extract_payload(out[c])[0].get("price")]
+    if missing_sina:
+        sina_map = fetch_realtime_sina_batch(missing_sina)
+        out.update(sina_map)
+    # 3. 东方财富/AKShare 补全仍然缺失的个股
+    missing_em = [c for c in codes if c not in out or not _extract_payload(out.get(c) or {})[0].get("price")]
+    if missing_em:
+        em_map = fetch_realtime_eastmoney_batch(missing_em)
+        out.update(em_map)
     return out
 
 
@@ -357,18 +366,19 @@ def fetch_realtime(codes: list[str]) -> dict[str, dict]:
 
 def fetch_hist_kline(code: str, days_back: int = 250, adjust: str = "qfq"):
     """历史K线：AKShare首选，腾讯备用"""
-    try:
-        import akshare as ak
-        end = datetime.now().strftime("%Y%m%d")
-        start = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
-        df = ak.stock_zh_a_hist(
-            symbol=code, period="daily",
-            start_date=start, end_date=end, adjust=adjust,
-        )
-        if df is not None and not df.empty:
-            return _with_meta(df, "AKShare")
-    except Exception:
-        pass
+    ak = _get_akshare()
+    if ak is not None:
+        try:
+            end = datetime.now().strftime("%Y%m%d")
+            start = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
+            df = ak.stock_zh_a_hist(
+                symbol=code, period="daily",
+                start_date=start, end_date=end, adjust=adjust,
+            )
+            if df is not None and not df.empty:
+                return _with_meta(df, "AKShare")
+        except Exception:
+            pass
 
     # 腾讯备用
     sym = _tencent_prefix(code)
@@ -406,8 +416,10 @@ def fetch_hist_kline(code: str, days_back: int = 250, adjust: str = "qfq"):
 
 def fetch_financial_indicator(code: str) -> dict | None:
     """主要财务指标（ROE、毛利率、净利率等）"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_financial_analysis_indicator(symbol=code, start_year="2020")
         if df is None or df.empty:
             return None
@@ -430,8 +442,10 @@ def fetch_financial_indicator(code: str) -> dict | None:
 
 def fetch_profit_statement(code: str) -> list[dict]:
     """利润表数据（近12季，约3年）"""
+    ak = _get_akshare()
+    if ak is None:
+        return []
     try:
-        import akshare as ak
         df = ak.stock_profit_sheet_by_report_em(symbol=code)
         if df is None or df.empty:
             return []
@@ -454,8 +468,10 @@ def fetch_profit_statement(code: str) -> list[dict]:
 
 def fetch_balance_sheet(code: str) -> dict | None:
     """资产负债表关键项"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_balance_sheet_by_report_em(symbol=code)
         if df is None or df.empty:
             return None
@@ -476,8 +492,10 @@ def fetch_balance_sheet(code: str) -> dict | None:
 
 def fetch_cashflow(code: str) -> dict | None:
     """现金流量表"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_cash_flow_sheet_by_report_em(symbol=code)
         if df is None or df.empty:
             return None
@@ -495,8 +513,10 @@ def fetch_cashflow(code: str) -> dict | None:
 
 def fetch_annual_financial(code: str) -> list[dict]:
     """年度财务摘要（近3年：营收、净利润、毛利率、研发投入）"""
+    ak = _get_akshare()
+    if ak is None:
+        return []
     try:
-        import akshare as ak
         df = ak.stock_profit_sheet_by_yearly_em(symbol=code)
         if df is None or df.empty:
             return []
@@ -528,8 +548,10 @@ def fetch_annual_financial(code: str) -> list[dict]:
 
 def fetch_top10_holders(code: str) -> list[dict]:
     """前十大流通股东"""
+    ak = _get_akshare()
+    if ak is None:
+        return []
     try:
-        import akshare as ak
         df = ak.stock_circulate_stockholder_details(symbol=code)
         if df is None or df.empty:
             return []
@@ -548,8 +570,10 @@ def fetch_top10_holders(code: str) -> list[dict]:
 
 def fetch_pledge_ratio(code: str) -> dict | None:
     """股权质押情况"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_pledge_stat_em(symbol=code)
         if df is None or df.empty:
             return None
@@ -565,8 +589,10 @@ def fetch_pledge_ratio(code: str) -> dict | None:
 
 def fetch_holder_num(code: str) -> dict | None:
     """股东人数变化（判断筹码集中度）"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_holder_num_em(symbol=code)
         if df is None or df.empty:
             return None
@@ -590,8 +616,10 @@ def fetch_holder_num(code: str) -> dict | None:
 
 def fetch_management_changes(code: str) -> list[dict]:
     """高管增减持"""
+    ak = _get_akshare()
+    if ak is None:
+        return []
     try:
-        import akshare as ak
         df = ak.stock_em_hold_change_detail(symbol=code)
         if df is None or df.empty:
             return []
@@ -616,8 +644,10 @@ def fetch_management_changes(code: str) -> list[dict]:
 
 def fetch_stock_info(code: str) -> dict | None:
     """个股基本信息（行业、上市日期、主营业务等）"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_individual_info_em(symbol=code)
         if df is None or df.empty:
             return None
@@ -654,8 +684,10 @@ def fetch_stock_info(code: str) -> dict | None:
 
 def fetch_industry_rank(industry: str) -> list[dict]:
     """同行业股票排名（按涨跌幅）"""
+    ak = _get_akshare()
+    if ak is None:
+        return []
     try:
-        import akshare as ak
         df = ak.stock_board_industry_cons_em(symbol=industry)
         if df is None or df.empty:
             return []
@@ -677,8 +709,10 @@ def fetch_industry_rank(industry: str) -> list[dict]:
 
 def fetch_sector_fund_flow(code: str) -> dict | None:
     """个股资金流向（主力净流入，近30日）"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_individual_fund_flow(stock=code, market="sh" if code.startswith(("6", "9")) else "sz")
         if df is None or df.empty:
             return None
@@ -700,8 +734,10 @@ def fetch_sector_fund_flow(code: str) -> dict | None:
 
 def fetch_north_fund_flow() -> dict | None:
     """北向资金当日净流入"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_em_hsgt_north_net_flow_in(symbol="沪股通")
         if df is None or df.empty:
             return None
@@ -720,8 +756,10 @@ def fetch_north_fund_flow() -> dict | None:
 
 def fetch_valuation_history(code: str) -> dict | None:
     """历史PE/PB分位（近3年）"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_a_indicator_lg(symbol=code)
         if df is None or df.empty:
             return None
@@ -762,8 +800,10 @@ def fetch_valuation_history(code: str) -> dict | None:
 
 def fetch_dragon_tiger(code: str) -> list[dict]:
     """龙虎榜数据（近30天）"""
+    ak = _get_akshare()
+    if ak is None:
+        return []
     try:
-        import akshare as ak
         end = datetime.now().strftime("%Y%m%d")
         start = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
         df = ak.stock_lhb_stock_statistic_em(symbol=code, start_date=start, end_date=end)
@@ -785,8 +825,10 @@ def fetch_dragon_tiger(code: str) -> list[dict]:
 
 def fetch_research_reports(code: str) -> list[dict]:
     """机构研报（近6个月）"""
+    ak = _get_akshare()
+    if ak is None:
+        return []
     try:
-        import akshare as ak
         df = ak.stock_research_report_em(symbol=code)
         if df is None or df.empty:
             return []
@@ -817,8 +859,10 @@ def fetch_research_reports(code: str) -> list[dict]:
 
 def fetch_analyst_consensus(code: str) -> dict | None:
     """分析师一致预期"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_analyst_forecast_em(symbol=code)
         if df is None or df.empty:
             return None
@@ -858,8 +902,10 @@ def fetch_analyst_consensus(code: str) -> dict | None:
 
 def fetch_limit_up_pool() -> dict | None:
     """今日涨停池统计"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         date_str = datetime.now().strftime("%Y%m%d")
         df = ak.stock_zt_pool_em(date=date_str)
         if df is None or df.empty:
@@ -875,8 +921,10 @@ def fetch_limit_up_pool() -> dict | None:
 
 def fetch_market_sentiment() -> dict | None:
     """大盘情绪（涨跌家数、涨停跌停）"""
+    ak = _get_akshare()
+    if ak is None:
+        return None
     try:
-        import akshare as ak
         df = ak.stock_zh_a_spot_em()
         if df is None or df.empty:
             return None
@@ -982,8 +1030,10 @@ def fetch_all_index_history() -> dict[str, list[dict]]:
 
 def fetch_stock_concept(code: str) -> list[str]:
     """个股所属概念板块"""
+    ak = _get_akshare()
+    if ak is None:
+        return []
     try:
-        import akshare as ak
         df = ak.stock_board_concept_name_em()
         if df is None or df.empty:
             return []
@@ -1006,8 +1056,10 @@ def fetch_stock_concept(code: str) -> list[str]:
 
 def fetch_announcements(code: str) -> list[dict]:
     """公告/事件信息，优先尝试 AKShare 可用接口。"""
+    ak = _get_akshare()
+    if ak is None:
+        return []
     try:
-        import akshare as ak
         candidates = [
             ("stock_notice_report", {"symbol": code}),
             ("stock_zh_a_notice_report", {"symbol": code}),
