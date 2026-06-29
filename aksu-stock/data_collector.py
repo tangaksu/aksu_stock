@@ -409,8 +409,9 @@ def _calc_kdj(highs: list[float], lows: list[float], closes: list[float],
         return {"k": None, "d": None, "j": None}
     rsv_list = []
     for i in range(len(closes) - period, len(closes)):
-        h = max(highs[i - period + 1: i + 1])
-        l = min(lows[i - period + 1: i + 1])
+        start = max(0, i - period + 1)
+        h = max(highs[start: i + 1])
+        l = min(lows[start: i + 1])
         rsv = (closes[i] - l) / (h - l) * 100 if h != l else 50.0
         rsv_list.append(rsv)
     k, d = 50.0, 50.0
