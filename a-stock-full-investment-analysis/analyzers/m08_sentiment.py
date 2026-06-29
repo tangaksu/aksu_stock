@@ -7,6 +7,8 @@ def analyze_sentiment(data: dict) -> ModuleResult:
     info = data.get("stock_info") or {}
     sentiment = data.get("market_sentiment") or {}
     rt = data.get("realtime") or {}
+    north_flow = data.get("north_fund_flow") or {}
+    concepts = data.get("stock_concepts") or []
 
     findings = []
     score = 5.0
@@ -57,8 +59,15 @@ def analyze_sentiment(data: dict) -> ModuleResult:
     }
 
     matched_themes = []
+    searchable = " ".join([
+        industry,
+        board,
+        info.get("name", ""),
+        info.get("business", ""),
+        " ".join(concepts),
+    ])
     for key, theme in hot_themes.items():
-        if key in industry or key in board or key in info.get("name", "") or key in info.get("business", ""):
+        if key in searchable:
             matched_themes.append(theme)
 
     if matched_themes:
@@ -66,6 +75,19 @@ def analyze_sentiment(data: dict) -> ModuleResult:
         findings.append(f"✅ 匹配热门题材：{'、'.join(matched_themes)}")
     else:
         findings.append("ℹ️ 未匹配当前主流热门题材，题材溢价空间有限")
+    if concepts:
+        findings.append(f"概念板块：{'、'.join(concepts[:5])}")
+    else:
+        findings.append("⚠️ 概念板块数据获取失败，题材识别覆盖不足")
+
+    sh_net = north_flow.get("sh_net")
+    if sh_net is not None:
+        north_yi = sh_net / 1e8
+        findings.append(f"北向资金：{north_yi:+.2f}亿")
+        if sh_net > 0:
+            score += 0.3
+        elif sh_net < 0:
+            score -= 0.3
 
     # ── 个股当日情绪 ──
     pct = rt.get("pct_change") or 0
@@ -94,7 +116,11 @@ def analyze_sentiment(data: dict) -> ModuleResult:
     score = min(10.0, max(1.0, score))
 
     theme_str = "、".join(matched_themes) if matched_themes else "无明显热门题材"
-    conclusion = f"题材属性：{theme_str}。市场情绪温度：{mood:.0f}%" if mood else f"题材属性：{theme_str}"
+    conclusion = (
+        f"题材属性：{theme_str}。"
+        + (f" 市场情绪温度：{mood:.0f}%。" if mood is not None else " 市场情绪数据缺失。")
+        + (f" 北向资金{sh_net / 1e8:+.2f}亿。" if sh_net is not None else "")
+    )
 
     return ModuleResult(
         module_id="M08",
@@ -106,5 +132,12 @@ def analyze_sentiment(data: dict) -> ModuleResult:
         mid_advice=f"{'题材具有持续性，中线可布局' if matched_themes else '题材稀缺性不强，中线依靠基本面'}",
         long_advice="情绪类投资应设置严格止盈位，不做长线持有",
         conclusion=conclusion,
-        detail={"themes": matched_themes, "mood_score": mood, "pct": pct, "turnover": turnover},
+        detail={
+            "themes": matched_themes,
+            "concepts": concepts,
+            "mood_score": mood,
+            "pct": pct,
+            "turnover": turnover,
+            "north_flow": sh_net,
+        },
     )

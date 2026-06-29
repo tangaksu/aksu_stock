@@ -85,10 +85,11 @@ def analyze_consensus(data: dict) -> ModuleResult:
 
     # ── 研报分析 ──
     if reports:
-        findings.append(f"近期研报：共 {len(reports)} 篇，覆盖机构如下：")
+        findings.append(f"近期研报：近6个月共 {len(reports)} 篇，最新明细如下：")
         # 展示机构名称与评级（去重）
         seen = set()
-        for r in reports[:6]:
+        detail_count = 0
+        for r in reports:
             institution = r.get("institution", "")
             title = r.get("title", "")[:25]
             rating = r.get("rating", "")
@@ -99,6 +100,9 @@ def analyze_consensus(data: dict) -> ModuleResult:
                 seen.add(key)
                 tp_str = f"，目标价 {fmt(tp)}" if tp else ""
                 findings.append(f"  [{date}] {institution}《{title}》评级：{rating}{tp_str}")
+                detail_count += 1
+            if detail_count >= 6:
+                break
         if len(reports) >= 5:
             score += 0.5
             findings.append("✅ 研报覆盖度高（近期≥5篇），机构持续关注")

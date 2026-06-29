@@ -34,7 +34,7 @@ def analyze_financial(data: dict) -> ModuleResult:
             warnings.append("⚠️ ROE < 5%，盈利能力偏弱")
 
     if gross_margin is not None:
-        findings.append(f"毛利率：{fmt(gross_margin)}%，净利率：{fmt(net_margin) if net_margin is not None else 'N/A'}%")
+        findings.append(f"毛利率：{fmt(gross_margin)}%，净利率：{fmt(net_margin)}%")
         if gross_margin >= 40:
             score += 1.0
             findings.append("✅ 毛利率 > 40%，高毛利行业护城河显著")

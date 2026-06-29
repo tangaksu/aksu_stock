@@ -1,6 +1,13 @@
 """M16 多维加权综合投资策略总结"""
 from __future__ import annotations
-from .base import ModuleResult, score_to_stars, fmt
+from .base import (
+    ModuleResult,
+    calc_trade_levels,
+    extract_positive_findings,
+    extract_risk_findings,
+    fmt,
+    position_from_total_score,
+)
 
 
 # 加权权重配置（对应规格文档）
@@ -98,13 +105,14 @@ def analyze_summary(data: dict, module_results: dict) -> ModuleResult:
             ma20 = round(sum(closes[-20:]) / 20, 2)
 
     if price:
-        entry_low = round(price * 0.98, 2)
-        entry_high = round(price * 1.02, 2)
-        stop_loss = ma20 or round(price * 0.92, 2)
+        levels = calc_trade_levels(price, ma10, ma20)
+        entry_low = levels["entry_low"]
+        entry_high = levels["entry_high"]
+        stop_loss = levels["stop_loss"]
         add_position = round(price * 1.05, 2)
-        tp_short = round(price * 1.08, 2)
-        tp_mid = round(price * 1.15, 2)
-        tp_long = round(price * 1.25, 2)
+        tp_short = levels["take_profit_1"]
+        tp_mid = levels["take_profit_2"]
+        tp_long = levels["take_profit_3"]
 
         findings.append(f"💰 当前价格：{price:.2f}（今日 {pct:+.2f}%）")
         findings.append(f"📍 最优入场区间：{entry_low} ~ {entry_high}")
@@ -113,16 +121,8 @@ def analyze_summary(data: dict, module_results: dict) -> ModuleResult:
         findings.append(f"🎯 止盈目标：短线{tp_short}（+8%）| 中线{tp_mid}（+15%）| 长线{tp_long}（+25%）")
 
     # ── 仓位建议 ──
-    if total_score >= 85:
-        position = "30-40%重点配置"
-    elif total_score >= 75:
-        position = "20-30%标准配置"
-    elif total_score >= 65:
-        position = "10-15%轻仓试探"
-    elif total_score >= 55:
-        position = "5%试仓观察"
-    else:
-        position = "空仓观望，暂不建仓"
+    position_band = position_from_total_score(total_score)
+    position = "空仓观望，暂不建仓" if position_band == "0%" else f"{position_band} 分层配置"
 
     findings.append(f"📦 建议仓位：{position}")
 
@@ -148,21 +148,8 @@ def analyze_summary(data: dict, module_results: dict) -> ModuleResult:
     highlights = []
     risks = []
 
-    for mid in ["M01", "M02", "M04", "M05"]:
-        r = module_results.get(mid)
-        if r and r.score >= 8 and r.key_findings:
-            for f in r.key_findings:
-                if "✅" in f:
-                    highlights.append(f.replace("✅ ", ""))
-                    break
-
-    for mid in ["M02", "M03", "M05", "M14"]:
-        r = module_results.get(mid)
-        if r and r.score < 5 and r.key_findings:
-            for f in r.key_findings:
-                if "⚠️" in f or "🚨" in f:
-                    risks.append(f.replace("⚠️ ", "").replace("🚨 ", ""))
-                    break
+    highlights = [item.replace("✅ ", "", 1) for item in extract_positive_findings(module_results, limit=3)]
+    risks = [item.replace("⚠️ ", "").replace("🚨 ", "") for item in extract_risk_findings(module_results, limit=3)]
 
     if highlights:
         findings.append(f"✅ 核心亮点：{' | '.join(highlights[:3])}")
@@ -201,5 +188,6 @@ def analyze_summary(data: dict, module_results: dict) -> ModuleResult:
             "price": price,
             "highlights": highlights,
             "risks": risks,
+            "position_band": position_band,
         },
     )

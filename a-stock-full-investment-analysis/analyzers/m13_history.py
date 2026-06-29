@@ -1,6 +1,16 @@
 """M13 历史走势规律与周期复盘"""
 from __future__ import annotations
+from datetime import datetime
 from .base import ModuleResult, score_to_stars, fmt
+
+
+def _safe_date(raw) -> datetime | None:
+    try:
+        text = str(raw)
+        normalized = text[:10] if len(text) >= 10 else text
+        return datetime.strptime(normalized.replace("/", "-"), "%Y-%m-%d")
+    except Exception:
+        return None
 
 
 def analyze_history(data: dict) -> ModuleResult:
@@ -34,14 +44,20 @@ def analyze_history(data: dict) -> ModuleResult:
     n6m = min(len(closes), 125)
     n3m = min(len(closes), 63)
 
-    h1y = round(max(closes[-n1y:]), 2)
-    l1y = round(min(closes[-n1y:]), 2)
+    recent_1y = closes[-n1y:]
+    recent_1y_dates = dates[-n1y:] if dates else []
+    h1y = round(max(recent_1y), 2)
+    l1y = round(min(recent_1y), 2)
     h6m = round(max(closes[-n6m:]), 2)
     l6m = round(min(closes[-n6m:]), 2)
+    high_idx = recent_1y.index(max(recent_1y))
+    low_idx = recent_1y.index(min(recent_1y))
+    high_date = recent_1y_dates[high_idx] if recent_1y_dates else ""
+    low_date = recent_1y_dates[low_idx] if recent_1y_dates else ""
 
     pos_1y = round((current - l1y) / (h1y - l1y) * 100, 1) if h1y > l1y else 50.0
 
-    findings.append(f"近1年区间：{l1y} ~ {h1y}，当前位置：{pos_1y:.0f}%分位")
+    findings.append(f"近1年区间：{l1y}（{str(low_date)[:10]}）~ {h1y}（{str(high_date)[:10]}），当前位置：{pos_1y:.0f}%分位")
     findings.append(f"近6月区间：{l6m} ~ {h6m}")
 
     if pos_1y < 20:
@@ -128,6 +144,46 @@ def analyze_history(data: dict) -> ModuleResult:
             score -= 1.0
             findings.append("⚠️ 下降趋势明确，价格中枢持续下移")
 
+    support = round(min(closes[-20:]), 2) if len(closes) >= 20 else l6m
+    resistance = round(max(closes[-20:]), 2) if len(closes) >= 20 else h6m
+    findings.append(f"趋势线参考：短期支撑 {support}，短期压力 {resistance}")
+
+    if len(closes) >= 40:
+        recent20 = closes[-20:]
+        if max(recent20) - min(recent20) <= min(recent20) * 0.12:
+            findings.append("✅ 近期处于平台整理区，关注放量突破")
+        left_low = min(recent20[:10])
+        right_low = min(recent20[10:])
+        if abs(left_low - right_low) / max(left_low, 1) < 0.05 and current > sum(recent20[-5:]) / 5:
+            findings.append("✅ 双底雏形成立，存在修复预期")
+        left_high = max(recent20[:10])
+        right_high = max(recent20[10:])
+        if abs(left_high - right_high) / max(left_high, 1) < 0.04 and current < sum(recent20[-5:]) / 5:
+            findings.append("⚠️ 双顶结构风险，需防回撤扩大")
+
+    seasonal = {}
+    report_window_returns = []
+    parsed_dates = [_safe_date(d) for d in dates]
+    for idx in range(1, len(closes)):
+        dt = parsed_dates[idx]
+        prev = closes[idx - 1]
+        if dt is None or prev == 0:
+            continue
+        quarter = f"Q{((dt.month - 1) // 3) + 1}"  # 将月份 1-12 映射到 Q1-Q4
+        seasonal.setdefault(quarter, []).append((closes[idx] - prev) / prev * 100)
+        if dt.month in (1, 4, 8, 10):
+            report_window_returns.append((closes[idx] - prev) / prev * 100)
+    if seasonal:
+        quarter_summary = []
+        for quarter in ("Q1", "Q2", "Q3", "Q4"):
+            values = seasonal.get(quarter) or []
+            if values:
+                quarter_summary.append(f"{quarter}{sum(values) / len(values):+.2f}%")
+        if quarter_summary:
+            findings.append("季节性规律（日均收益近似）： " + " | ".join(quarter_summary))
+    if report_window_returns:
+        findings.append(f"财报窗口月平均表现：{sum(report_window_returns) / len(report_window_returns):+.2f}%")
+
     score = min(10.0, max(1.0, score))
 
     conclusion = (
@@ -145,5 +201,13 @@ def analyze_history(data: dict) -> ModuleResult:
         mid_advice=f"{'中线处于低估历史区间，中期持仓价值显现' if pos_1y < 40 else '中线在高位区，波段做T降低成本'}",
         long_advice=f"历史低位布局（年内分位<20%）长线持有胜率更高",
         conclusion=conclusion,
-        detail={"position_pct_1y": pos_1y, "h1y": h1y, "l1y": l1y},
+        detail={
+            "position_pct_1y": pos_1y,
+            "h1y": h1y,
+            "l1y": l1y,
+            "high_date": str(high_date)[:10],
+            "low_date": str(low_date)[:10],
+            "support": support,
+            "resistance": resistance,
+        },
     )

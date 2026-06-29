@@ -6,6 +6,7 @@ from .base import ModuleResult, score_to_stars, fmt, yi
 def analyze_liquidity(data: dict) -> ModuleResult:
     rt = data.get("realtime") or {}
     df = data.get("kline_df")
+    info = data.get("stock_info") or {}
 
     findings = []
     warnings = []
@@ -47,10 +48,12 @@ def analyze_liquidity(data: dict) -> ModuleResult:
     if df is not None and not df.empty:
         vol_col = "成交量" if "成交量" in df.columns else "volume"
         close_col = "收盘" if "收盘" in df.columns else "close"
+        amount_col = "成交额" if "成交额" in df.columns else None
 
         if vol_col in df.columns:
             vols = df[vol_col].tolist()
             closes = df[close_col].tolist() if close_col in df.columns else []
+            amounts = df[amount_col].tolist() if amount_col and amount_col in df.columns else []
 
             # 计算均量
             avg_vol5 = sum(vols[-5:]) / 5 if len(vols) >= 5 else None
@@ -85,6 +88,33 @@ def analyze_liquidity(data: dict) -> ModuleResult:
                 if is_near_low and avg_vol5 and avg_vol20 and avg_vol5 > avg_vol20 * 1.5:
                     score += 1.0
                     findings.append("✅ 低位放量（底部信号），筹码换手充分，反转可期")
+
+            avg_daily_amount = None
+            if amounts:
+                usable_amounts = [float(v) for v in amounts[-20:] if v]
+                if usable_amounts:
+                    avg_daily_amount = sum(usable_amounts) / len(usable_amounts)
+            if avg_daily_amount is None and closes and vols:
+                est_amounts = [c * v for c, v in zip(closes[-20:], vols[-20:])]
+                if est_amounts:
+                    avg_daily_amount = sum(est_amounts) / len(est_amounts)
+            float_cap = rt.get("circulate_cap")
+            if float_cap is None:
+                try:
+                    float_cap = float(str(info.get("float_cap", "0")).replace("亿", "").replace(",", "")) * 1e8
+                except Exception:
+                    float_cap = None
+            elif float_cap < 1e6:
+                float_cap = float_cap * 1e8
+            if avg_daily_amount and float_cap:
+                turnover_days = float_cap / avg_daily_amount
+                findings.append(f"流动性换手天数：{turnover_days:.1f}天（流通市值/20日均成交额）")
+                if turnover_days > 120:
+                    score -= 1.0
+                    warnings.append("⚠️ 流通市值相对成交额偏大，退出效率较低")
+                elif turnover_days < 30:
+                    score += 0.5
+                    findings.append("✅ 流动性充裕，资金进出效率较高")
 
     score = min(10.0, max(1.0, score))
     all_findings = findings + warnings

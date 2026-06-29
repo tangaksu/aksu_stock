@@ -1,7 +1,14 @@
 """M14 交易纪律与风控体系"""
 from __future__ import annotations
 import math
-from .base import ModuleResult, score_to_stars, fmt
+from .base import (
+    ModuleResult,
+    calc_trade_levels,
+    extract_risk_findings,
+    fmt,
+    position_from_total_score,
+    score_to_stars,
+)
 
 
 def analyze_risk_control(data: dict, module_results: dict | None = None) -> ModuleResult:
@@ -63,8 +70,9 @@ def analyze_risk_control(data: dict, module_results: dict | None = None) -> Modu
 
     # ── 止损位体系 ──
     if current:
+        trade_levels = calc_trade_levels(current, ma10, ma20)
         stop_warn = ma10 or round(current * 0.95, 2)
-        stop_risk = ma20 or round(current * 0.92, 2)
+        stop_risk = trade_levels["stop_loss"]
         stop_cut = round(current * 0.88, 2)
 
         findings.append(f"当前价格：{current:.2f}（今日涨跌：{pct:+.2f}%）")
@@ -73,9 +81,9 @@ def analyze_risk_control(data: dict, module_results: dict | None = None) -> Modu
         findings.append(f"🛡 清仓止损位（全部）：{stop_cut:.2f}（-12%硬止损）")
 
         # 止盈位
-        tp1 = round(current * 1.08, 2)
-        tp2 = round(current * 1.15, 2)
-        tp3 = round(current * 1.25, 2)
+        tp1 = trade_levels["take_profit_1"]
+        tp2 = trade_levels["take_profit_2"]
+        tp3 = trade_levels["take_profit_3"]
         findings.append(f"🎯 止盈位：+8%={tp1} | +15%={tp2} | +25%={tp3}")
 
         # 风险收益比（计算逻辑：止盈目标2(+15%) / 硬止损(-12%)）
@@ -129,18 +137,12 @@ def analyze_risk_control(data: dict, module_results: dict | None = None) -> Modu
     # ── 仓位建议 ──
     total_score = None
     if module_results:
-        scores = [r.score for r in module_results.values() if hasattr(r, "score")]
-        total_score = sum(scores) / len(scores) * 10 if scores else None
+        from .m16_summary import calc_weighted_score
+        total_score = calc_weighted_score(module_results)
 
     if total_score:
-        if total_score >= 75:
-            position_advice = "可配置30-40%仓位"
-        elif total_score >= 65:
-            position_advice = "建议10-20%轻仓观察"
-        elif total_score >= 55:
-            position_advice = "建议5-10%试仓"
-        else:
-            position_advice = "不建议建仓，空仓观望"
+        position_band = position_from_total_score(total_score)
+        position_advice = f"建议仓位 {position_band}"
         findings.append(f"📦 仓位建议：{position_advice}（基于各模块综合评分）")
     else:
         findings.append("📦 仓位建议：根据综合评分确定（评分≥75分配置30-40%，≥65分10-20%，<60分空仓）")
@@ -149,14 +151,23 @@ def analyze_risk_control(data: dict, module_results: dict | None = None) -> Modu
     warnings.append("⛔ 杠杆门禁：任何情况下严禁借贷/融资进行高风险博弈操作")
 
     # ── 风险汇总 ──
-    all_risks = [
-        ("致命风险", ["股权质押爆仓", "财务造假", "退市风险"]),
-        ("中度风险", ["业绩大幅下滑", "高位放量出货", "大股东持续减持"]),
-        ("轻微风险", ["短期超买", "估值偏高", "解禁抛压"]),
-    ]
-
-    for level, risks in all_risks:
-        findings.append(f"【{level}】需重点排查：{'、'.join(risks)}")
+    aggregated_risks = extract_risk_findings({k: v for k, v in (module_results or {}).items() if k != "M14"})
+    if aggregated_risks:
+        findings.append("风险清单（来自前序模块真实信号）：")
+        findings.extend(f"  {risk}" for risk in aggregated_risks[:8])
+        major_risk_count = sum(1 for risk in aggregated_risks if "🚨" in risk)
+        warning_count = sum(1 for risk in aggregated_risks if "⚠️" in risk)
+        if major_risk_count >= 4:
+            risk_grade = "高"
+            score -= 1.0
+        elif major_risk_count >= 2:
+            risk_grade = "中"
+            score -= 0.5
+        else:
+            risk_grade = "低"
+        findings.append(f"风险评级：{risk_grade}（重大风险 {major_risk_count} 个，一般风险 {warning_count} 个）")
+    else:
+        findings.append("风险清单：当前未提取到前序模块明确风险信号")
 
     score = min(10.0, max(1.0, score))
     all_findings = findings + warnings

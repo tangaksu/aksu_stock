@@ -4,6 +4,10 @@ HTML 报告生成器 — 输出机构级全维度股票分析报告
 """
 from __future__ import annotations
 from datetime import datetime
+from analyzers.base import DATA_MISSING_TEXT
+
+SKILL_VERSION = "v4.0.0"
+UI_MISSING_TEXT = "缺失"
 
 
 def _score_color(score: float, mode: str = "100") -> str:
@@ -115,7 +119,7 @@ def _module_card(result) -> str:
       <div style="margin-top:2px">{_stars_html(result.stars)}</div>
     </div>
   </div>
-  <div style="margin-bottom:12px">{_findings_html(result.key_findings[:12])}</div>
+  <div style="margin-bottom:12px">{_findings_html(result.key_findings)}</div>
   {"" if not advice_rows else f'<div style="background:#f8fafc;border-radius:8px;padding:10px 12px;margin-top:10px"><table style="width:100%;border-collapse:collapse">{advice_rows}</table></div>'}
   <div style="margin-top:10px;padding:8px 12px;background:{bg};border-radius:6px;
               font-size:0.88em;font-weight:600;color:{color};border-left:3px solid {color}">
@@ -123,6 +127,31 @@ def _module_card(result) -> str:
   </div>
 </div>
 """
+
+
+def _meta_table_html(data: dict) -> str:
+    meta = data.get("_meta") or {}
+    if not meta:
+        return ""
+    rows = []
+    for key, item in meta.items():
+        rows.append(
+            f"<tr>"
+            f"<td style='padding:6px 8px;border-bottom:1px solid #e5e7eb'>{key}</td>"
+            f"<td style='padding:6px 8px;border-bottom:1px solid #e5e7eb'>{item.get('source', DATA_MISSING_TEXT)}</td>"
+            f"<td style='padding:6px 8px;border-bottom:1px solid #e5e7eb'>{item.get('fetched_at', DATA_MISSING_TEXT)}</td>"
+            f"<td style='padding:6px 8px;border-bottom:1px solid #e5e7eb;color:{'#15803d' if item.get('success') else '#dc2626'}'>{'成功' if item.get('success') else '失败'}</td>"
+            f"<td style='padding:6px 8px;border-bottom:1px solid #e5e7eb'>{item.get('message', DATA_MISSING_TEXT)}</td>"
+            f"</tr>"
+        )
+    return (
+        "<div style='background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;margin-bottom:16px'>"
+        "<div style='font-size:1.05em;font-weight:700;color:#111827;margin-bottom:12px'>数据采集追踪表</div>"
+        "<table style='width:100%;border-collapse:collapse;font-size:0.85em'>"
+        "<tr style='background:#f8fafc;color:#475569'><th style='padding:6px 8px;text-align:left'>字段</th><th style='padding:6px 8px;text-align:left'>来源</th><th style='padding:6px 8px;text-align:left'>时间</th><th style='padding:6px 8px;text-align:left'>状态</th><th style='padding:6px 8px;text-align:left'>说明</th></tr>"
+        + "".join(rows)
+        + "</table></div>"
+    )
 
 
 def generate_report(data: dict, module_results: dict) -> str:
@@ -136,6 +165,7 @@ def generate_report(data: dict, module_results: dict) -> str:
     industry = info.get("industry", "")
     board = info.get("board", "")
     fetch_time = data.get("fetch_time", datetime.now().isoformat())[:19]
+    quality = data.get("data_quality") or {}
 
     # 获取综合分析结果
     m16 = module_results.get("M16")
@@ -194,7 +224,7 @@ def generate_report(data: dict, module_results: dict) -> str:
       <div style="font-size:0.8em;opacity:0.8;margin-bottom:6px">📊 行情速览</div>
       <div style="font-size:1.3em;font-weight:700">{price:.2f} 元</div>
       <div style="font-size:0.9em;color:{"#4ade80" if pct > 0 else "#f87171"}">{pct:+.2f}%</div>
-      <div style="font-size:0.8em;opacity:0.75;margin-top:4px">MA10:{ma10 or "N/A"} | MA20:{ma20 or "N/A"}</div>
+      <div style="font-size:0.8em;opacity:0.75;margin-top:4px">MA10:{ma10 if ma10 is not None else UI_MISSING_TEXT} | MA20:{ma20 if ma20 is not None else UI_MISSING_TEXT}</div>
     </div>
     <div style="background:rgba(255,255,255,0.1);border-radius:8px;padding:12px">
       <div style="font-size:0.8em;opacity:0.8;margin-bottom:6px">📅 三周期评级</div>
@@ -252,6 +282,18 @@ def generate_report(data: dict, module_results: dict) -> str:
 </div>
 """
 
+    audit_banner = ""
+    failed_sections = quality.get("failed_sections") or []
+    if failed_sections:
+        audit_banner = f"""
+<div style="background:#fff7ed;border:1px solid #fdba74;border-radius:12px;padding:16px;margin-bottom:16px">
+  <div style="font-weight:700;color:#9a3412;margin-bottom:6px">⚠️ 报告降级说明</div>
+  <div style="font-size:0.88em;color:#7c2d12;line-height:1.7">
+    本次报告存在采集失败字段：{", ".join(failed_sections)}。以下模块已尽量基于真实已采集数据输出，缺失字段均已保留失败说明。
+  </div>
+</div>
+"""
+
     # ── 各模块卡片 ──
     modules_html = ""
     for mid in ["M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08",
@@ -291,6 +333,8 @@ def generate_report(data: dict, module_results: dict) -> str:
 <body>
   <div class="container">
     {dashboard}
+    {audit_banner}
+    {_meta_table_html(data)}
     <div style="margin-bottom:16px">
       <h2 style="color:#1e3a5f;font-size:1.1em;margin:0 0 4px;border-left:4px solid #1e40af;padding-left:10px">
         16大模块深度分析报告
@@ -302,8 +346,8 @@ def generate_report(data: dict, module_results: dict) -> str:
       <div style="font-weight:700;margin-bottom:8px">⚠️ 风险提示</div>
       <div style="font-size:0.85em;opacity:0.85;line-height:1.8">
         本分析基于公开市场数据与专业投研逻辑推演，仅为投资参考，不构成任何投资建议。<br>
-        股市有风险，投资需谨慎。数据来源：东方财富、腾讯财经、新浪财经、AKShare。<br>
-        报告生成时间：{fetch_time} | 技能版本：v3.5.0
+        股市有风险，投资需谨慎。数据来源：东方财富、AKShare、新浪财经、腾讯财经、同花顺、通用Web搜索。<br>
+        报告生成时间：{fetch_time} | 技能版本：{SKILL_VERSION}
       </div>
     </div>
   </div>
