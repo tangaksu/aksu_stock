@@ -1,0 +1,7 @@
+{
+  "name": "a-stock-full-investment-analysis",
+  "version": "3.5.0",
+  "description": "A股机构级全维度股票投资分析报告生成技能，16大模块，100分制综合评分，HTML报告输出",
+  "entry": "main.py",
+  "tags": ["A股", "投研", "HTML报告", "估值", "技术分析", "资金筹码", "风控"]
+}
