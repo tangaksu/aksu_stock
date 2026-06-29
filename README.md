@@ -1,0 +1,2 @@
+# aksu_stock
+q
