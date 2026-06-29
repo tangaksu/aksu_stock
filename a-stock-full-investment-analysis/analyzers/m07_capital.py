@@ -52,6 +52,7 @@ def analyze_capital(data: dict) -> ModuleResult:
 
     # ── 近5/10/30日累计资金流向 ──
     recent = fund_flow.get("recent") or []
+    inflow_streak = outflow_streak = 0
     if len(recent) >= 3:
         def _get_main_net(row):
             # 兼容原始中文键和归一化英文键
@@ -65,7 +66,18 @@ def analyze_capital(data: dict) -> ModuleResult:
                     except (TypeError, ValueError):
                         pass
             return 0
-        total_5d = sum(_get_main_net(r) for r in recent[:5])
+        recent5_rows = recent[:5]
+        table_lines = []
+        for row in recent5_rows:
+            row_main = _get_main_net(row)
+            table_lines.append(
+                f"  [{row.get('日期', row.get('date', ''))}] 主力{yi(row_main)} | 超大单{yi(row.get('超大单净流入-净额') or row.get('super_big_net'))} | "
+                f"大单{yi(row.get('大单净流入-净额') or row.get('big_net'))} | 占比{fmt(row.get('主力净流入-净占比') or row.get('main_net_pct'))}%"
+            )
+        findings.append("近5日资金流明细：")
+        findings.extend(table_lines)
+
+        total_5d = sum(_get_main_net(r) for r in recent5_rows)
         total_10d = sum(_get_main_net(r) for r in recent[:10]) if len(recent) >= 10 else None
         total_30d = sum(_get_main_net(r) for r in recent[:30]) if len(recent) >= 30 else None
         findings.append(f"近5日主力累计净流入：{yi(total_5d)}")
@@ -75,19 +87,36 @@ def analyze_capital(data: dict) -> ModuleResult:
             findings.append(f"近30日主力累计净流入：{yi(total_30d)}")
 
         # 连续流向趋势判断
-        recent5_nets = [_get_main_net(r) for r in recent[:5]]
+        recent5_nets = [_get_main_net(r) for r in recent5_rows]
         inflow_days = sum(1 for n in recent5_nets if n > 0)
         outflow_days = sum(1 for n in recent5_nets if n < 0)
-        findings.append(f"近5日中：净流入 {inflow_days} 天，净流出 {outflow_days} 天")
+        inflow_streak = 0
+        outflow_streak = 0
+        for net in recent5_nets:
+            if net > 0:
+                inflow_streak += 1
+                outflow_streak = 0
+            elif net < 0:
+                outflow_streak += 1
+                inflow_streak = 0
+            else:
+                inflow_streak = outflow_streak = 0
+        findings.append(f"近5日中：净流入 {inflow_days} 天，净流出 {outflow_days} 天，当前连续净流入 {inflow_streak} 天 / 连续净流出 {outflow_streak} 天")
 
         if total_5d > 0:
             score += 0.5
-            if inflow_days >= 4:
+            if inflow_streak >= 3:
+                score += 1.0
+                findings.append(f"✅ 连续净流入 {inflow_streak} 天，主力建仓迹象明显")
+            elif inflow_days >= 4:
                 findings.append("✅ 近5日持续净流入，筹码积累信号")
             else:
                 findings.append("✅ 近5日整体净流入，资金小幅布局")
         else:
-            if outflow_days >= 4:
+            if outflow_streak >= 3:
+                score -= 1.0
+                warnings.append(f"⚠️ 连续净流出 {outflow_streak} 天，主力资金态度偏空")
+            elif outflow_days >= 4:
                 findings.append("⚠️ 近5日持续净流出，主力不认可当前价格")
             else:
                 findings.append("⚠️ 近5日整体净流出，资金偏谨慎")
@@ -148,5 +177,11 @@ def analyze_capital(data: dict) -> ModuleResult:
         mid_advice="中线以5日累计净流入方向为主要参考，持续流入可持有",
         long_advice="长线以基本面为主，资金面为辅助验证",
         conclusion=conclusion,
-        detail={"fund_flow": fund_flow, "dragon_count": len(dragon), "stage": stage},
+        detail={
+            "fund_flow": fund_flow,
+            "dragon_count": len(dragon),
+            "stage": stage,
+            "inflow_streak": inflow_streak,
+            "outflow_streak": outflow_streak,
+        },
     )

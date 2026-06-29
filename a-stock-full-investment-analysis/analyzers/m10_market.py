@@ -24,6 +24,7 @@ def _calc_stock_volatility(stock_closes: list) -> float | None:
 
 def analyze_market(data: dict) -> ModuleResult:
     index_data = data.get("index_data") or {}
+    index_history = data.get("index_history") or {}
     rt = data.get("realtime") or {}
     df = data.get("kline_df")
     info = data.get("stock_info") or {}
@@ -43,6 +44,24 @@ def analyze_market(data: dict) -> ModuleResult:
         # 判断大盘整体方向
         all_pcts = [v.get("pct_change") or 0 for v in index_data.values()]
         avg_index_pct = sum(all_pcts) / len(all_pcts) if all_pcts else 0
+        trend_tags = []
+        for name, rows in index_history.items():
+            closes = [r.get("close") for r in rows if r.get("close") is not None]
+            if len(closes) >= 20:
+                ma20 = sum(closes[-20:]) / 20
+                if closes[-1] > ma20 and closes[-1] >= closes[0]:
+                    trend = "多头"
+                elif closes[-1] < ma20 and closes[-1] <= closes[0]:
+                    trend = "弱势"
+                else:
+                    trend = "震荡"
+                trend_tags.append(f"{name}{trend}")
+        if trend_tags:
+            findings.append("近20日指数趋势：" + " | ".join(trend_tags))
+            if sum("多头" in tag for tag in trend_tags) >= 2:
+                avg_index_pct += 0.5
+            elif sum("弱势" in tag for tag in trend_tags) >= 2:
+                avg_index_pct -= 0.5
 
         if avg_index_pct > 1.5:
             score += 1.5

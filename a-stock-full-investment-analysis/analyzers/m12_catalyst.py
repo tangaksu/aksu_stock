@@ -9,6 +9,8 @@ def analyze_catalyst(data: dict) -> ModuleResult:
     info = data.get("stock_info") or {}
     fi = data.get("financial_indicator") or {}
     profits = data.get("profit_statement") or []
+    concepts = data.get("stock_concepts") or []
+    announcements = data.get("announcements") or []
 
     findings = []
     score = 5.0
@@ -48,8 +50,9 @@ def analyze_catalyst(data: dict) -> ModuleResult:
         "地产": "房地产救市政策",
         "消费": "促消费/内需扩张政策",
     }
+    searchable = " ".join([industry, " ".join(concepts)])
     for key, policy_desc in policy_sensitive.items():
-        if key in industry:
+        if key in searchable:
             score += 0.5
             upcoming_catalysts.append(f"潜在政策催化：{policy_desc}")
             findings.append(f"✅ {industry} 行业存在政策催化预期：{policy_desc}")
@@ -65,6 +68,19 @@ def analyze_catalyst(data: dict) -> ModuleResult:
             score += 0.5
             upcoming_catalysts.append(f"近期{len(recent_reports)}篇新研报，机构持续关注")
             findings.append(f"✅ 近1个月新发研报 {len(recent_reports)} 篇，机构催化效应")
+
+    if announcements:
+        findings.append("近期公告：")
+        for notice in announcements[:5]:
+            title = notice.get("title", "")
+            date = notice.get("date", "")[:10]
+            findings.append(f"  [{date}] {title[:40]}")
+            if any(key in title for key in ["中标", "订单", "回购", "增持", "合作", "合同"]):
+                upcoming_catalysts.append(f"公告催化：{title[:24]}")
+                score += 0.5
+            if any(key in title for key in ["减持", "问询", "处罚", "立案", "诉讼", "解禁"]):
+                upcoming_risks.append(f"公告风险：{title[:24]}")
+                score -= 0.5
 
     # ── 解禁风险窗口 ──
     list_date = info.get("list_date", "")

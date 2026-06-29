@@ -24,6 +24,32 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/120.0.0.0 Safari/537.36"
 )
+SOURCE_PRIORITY = {
+    "realtime": ["东方财富/AKShare", "新浪财经", "腾讯财经"],
+    "kline_df": ["AKShare", "腾讯财经"],
+    "stock_info": ["AKShare"],
+    "financial_indicator": ["AKShare"],
+    "profit_statement": ["AKShare"],
+    "balance_sheet": ["AKShare"],
+    "cashflow": ["AKShare"],
+    "annual_financial": ["AKShare"],
+    "top10_holders": ["AKShare"],
+    "pledge_ratio": ["AKShare"],
+    "holder_num": ["AKShare"],
+    "management_changes": ["AKShare"],
+    "fund_flow": ["AKShare"],
+    "valuation_history": ["AKShare"],
+    "research_reports": ["AKShare"],
+    "analyst_consensus": ["AKShare"],
+    "dragon_tiger": ["AKShare"],
+    "market_sentiment": ["AKShare"],
+    "index_data": ["新浪财经"],
+    "index_history": ["腾讯财经", "AKShare"],
+    "north_fund_flow": ["AKShare"],
+    "stock_concepts": ["AKShare"],
+    "announcements": ["AKShare"],
+    "industry_peers": ["AKShare"],
+}
 
 
 def _tencent_prefix(code: str) -> str:
@@ -46,9 +72,99 @@ def _safe_float(v: Any, default: float | None = None) -> float | None:
         return default
 
 
+def _with_meta(payload: Any, source: str, success: bool = True, message: str = "") -> Any:
+    """为采集结果附带来源信息。"""
+    stamp = datetime.now().isoformat(timespec="seconds")
+    if isinstance(payload, dict):
+        payload["_source"] = source
+        payload["_fetched_at"] = stamp
+        payload["_success"] = success
+        if message:
+            payload["_message"] = message
+        return payload
+    return {
+        "data": payload,
+        "_source": source,
+        "_fetched_at": stamp,
+        "_success": success,
+        "_message": message,
+    }
+
+
+def _extract_payload(payload: Any) -> tuple[Any, str | None, str | None, bool]:
+    """拆出 payload 与元信息。"""
+    if isinstance(payload, dict) and "_source" in payload:
+        plain = {k: v for k, v in payload.items() if not k.startswith("_")}
+        return plain, payload.get("_source"), payload.get("_message"), bool(payload.get("_success", True))
+    if isinstance(payload, dict) and {"data", "_source", "_fetched_at"} <= set(payload.keys()):
+        return payload.get("data"), payload.get("_source"), payload.get("_message"), bool(payload.get("_success", True))
+    return payload, None, None, bool(payload)
+
+
+def _set_meta(result: dict[str, Any], key: str, payload: Any, default_sources: list[str] | None = None) -> None:
+    value, source, message, success = _extract_payload(payload)
+    result[key] = value
+    meta = result.setdefault("_meta", {})
+    has_value = True
+    if value is None:
+        has_value = False
+    elif isinstance(value, (list, dict, str, tuple, set)) and len(value) == 0:
+        has_value = False
+    elif hasattr(value, "empty"):
+        has_value = not bool(value.empty)
+    meta[key] = {
+        "source": source or " / ".join(default_sources or SOURCE_PRIORITY.get(key, [])) or "未知来源",
+        "fetched_at": datetime.now().isoformat(timespec="seconds"),
+        "success": bool(success and has_value),
+        "message": message or ("采集成功" if success and has_value else "⚠️ 数据获取失败（上游接口未返回有效内容）"),
+    }
+
+
+def _status_text(meta: dict[str, Any]) -> str:
+    return "✓" if meta.get("success") else f"⚠ {meta.get('message', '失败')}"
+
+
 # ──────────────────────────────────────────────
 # 模块 1：实时行情
 # ──────────────────────────────────────────────
+
+def fetch_realtime_eastmoney_batch(codes: list[str]) -> dict[str, dict]:
+    """东方财富实时行情（经由 AKShare）。"""
+    if not codes:
+        return {}
+    try:
+        import akshare as ak
+        df = ak.stock_zh_a_spot_em()
+        if df is None or df.empty:
+            return {}
+        code_col = "代码" if "代码" in df.columns else None
+        if not code_col:
+            return {}
+        filtered = df[df[code_col].astype(str).isin(codes)]
+        out: dict[str, dict] = {}
+        for _, row in filtered.iterrows():
+            code = str(row.get("代码", ""))
+            out[code] = _with_meta({
+                "code": code,
+                "name": str(row.get("名称", "")),
+                "price": _safe_float(row.get("最新价")),
+                "prev_close": _safe_float(row.get("昨收")),
+                "open": _safe_float(row.get("今开")),
+                "high": _safe_float(row.get("最高")),
+                "low": _safe_float(row.get("最低")),
+                "volume": _safe_float(row.get("成交量"), 0),
+                "amount": _safe_float(row.get("成交额"), 0),
+                "turnover_rate": _safe_float(row.get("换手率")),
+                "pct_change": _safe_float(row.get("涨跌幅")),
+                "pe_ttm": _safe_float(row.get("市盈率-动态")),
+                "pb": _safe_float(row.get("市净率")),
+                "market_cap": _safe_float(row.get("总市值")),
+                "circulate_cap": _safe_float(row.get("流通市值")),
+            }, "东方财富/AKShare")
+        return out
+    except Exception:
+        return {}
+
 
 def fetch_realtime_tencent(code: str) -> dict | None:
     """腾讯财经实时行情（单只，首选）"""
@@ -71,7 +187,7 @@ def fetch_realtime_tencent(code: str) -> dict | None:
         pct = None
         if price and prev_close and prev_close > 0:
             pct = round((price - prev_close) / prev_close * 100, 2)
-        return {
+        return _with_meta({
             "code": code,
             "name": parts[1],
             "price": price,
@@ -87,7 +203,7 @@ def fetch_realtime_tencent(code: str) -> dict | None:
             "pb": _safe_float(parts[46]) if len(parts) > 46 else None,
             "market_cap": _safe_float(parts[44]) if len(parts) > 44 else None,
             "circulate_cap": _safe_float(parts[45]) if len(parts) > 45 else None,
-        }
+        }, "腾讯财经")
     except Exception:
         return None
 
@@ -120,7 +236,7 @@ def fetch_realtime_sina_batch(codes: list[str]) -> dict[str, dict]:
             pct = None
             if price and prev_close and prev_close > 0:
                 pct = round((price - prev_close) / prev_close * 100, 2)
-            out[code] = {
+            out[code] = _with_meta({
                 "code": code,
                 "name": parts[0],
                 "open": _safe_float(parts[1]),
@@ -131,17 +247,20 @@ def fetch_realtime_sina_batch(codes: list[str]) -> dict[str, dict]:
                 "volume": _safe_float(parts[8], 0),
                 "amount": _safe_float(parts[9], 0),
                 "pct_change": pct,
-            }
+            }, "新浪财经")
     except Exception:
         pass
     return out
 
 
 def fetch_realtime(codes: list[str]) -> dict[str, dict]:
-    """统一实时行情入口：新浪批量 + 腾讯逐个补全"""
-    out = fetch_realtime_sina_batch(codes)
+    """统一实时行情入口：东方财富优先，其次新浪，最后腾讯补全。"""
+    out = fetch_realtime_eastmoney_batch(codes)
+    sina_map = fetch_realtime_sina_batch([c for c in codes if c not in out or not _extract_payload(out[c])[0].get("price")])
+    out.update(sina_map)
     for c in codes:
-        if c not in out or not out[c].get("price"):
+        plain, _, _, _ = _extract_payload(out.get(c) or {})
+        if c not in out or not plain.get("price"):
             q = fetch_realtime_tencent(c)
             if q:
                 out[c] = q
@@ -163,7 +282,7 @@ def fetch_hist_kline(code: str, days_back: int = 250, adjust: str = "qfq"):
             start_date=start, end_date=end, adjust=adjust,
         )
         if df is not None and not df.empty:
-            return df
+            return _with_meta(df, "AKShare")
     except Exception:
         pass
 
@@ -192,7 +311,7 @@ def fetch_hist_kline(code: str, days_back: int = 250, adjust: str = "qfq"):
                 })
             except Exception:
                 continue
-        return pd.DataFrame(rows) if rows else None
+        return _with_meta(pd.DataFrame(rows), "腾讯财经") if rows else None
     except Exception:
         return None
 
@@ -587,15 +706,25 @@ def fetch_research_reports(code: str) -> list[dict]:
         df = ak.stock_research_report_em(symbol=code)
         if df is None or df.empty:
             return []
+        cutoff = datetime.now() - timedelta(days=183)
         result = []
-        for _, row in df.head(10).iterrows():
+        for _, row in df.iterrows():
+            raw_date = str(row.get("发布日期", ""))
+            try:
+                report_date = datetime.strptime(raw_date[:10].replace("/", "-"), "%Y-%m-%d")
+            except Exception:
+                report_date = None
+            if report_date and report_date < cutoff:
+                continue
             result.append({
-                "date": str(row.get("发布日期", "")),
+                "date": raw_date,
                 "title": str(row.get("报告名称", "")),
                 "institution": str(row.get("研究机构", "")),
                 "rating": str(row.get("投资评级", "")),
                 "target_price": _safe_float(row.get("目标价格")),
             })
+            if len(result) >= 20:
+                break
         return result
     except Exception:
         return []
@@ -717,7 +846,49 @@ def fetch_index_data() -> dict | None:
             result[name] = {"price": price, "pct_change": pct, "amount": _safe_float(parts[9])}
     except Exception:
         pass
-    return result if result else None
+    return _with_meta(result, "新浪财经") if result else None
+
+
+def fetch_index_history(symbol: str, days_back: int = 60) -> list[dict]:
+    """指数历史K线（腾讯财经）"""
+    url = f"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={symbol},day,,,{days_back},"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=DEFAULT_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        kdata = (
+            data.get("data", {}).get(symbol, {}).get("day")
+            or data.get("data", {}).get(symbol, {}).get("qfqday")
+            or []
+        )
+        rows = []
+        for row in kdata:
+            try:
+                rows.append({
+                    "date": str(row[0]),
+                    "open": float(row[1]),
+                    "close": float(row[2]),
+                    "high": float(row[3]),
+                    "low": float(row[4]),
+                    "volume": float(row[5]) if len(row) > 5 else 0,
+                })
+            except Exception:
+                continue
+        return rows
+    except Exception:
+        return []
+
+
+def fetch_all_index_history() -> dict[str, list[dict]]:
+    """主要指数近60日K线。"""
+    symbol_map = {
+        "上证指数": "sh000001",
+        "深成指": "sz399001",
+        "创业板指": "sz399006",
+        "沪深300": "sh000300",
+    }
+    result = {name: fetch_index_history(symbol) for name, symbol in symbol_map.items()}
+    return _with_meta(result, "腾讯财经", success=any(result.values()), message="采集完成" if any(result.values()) else "⚠️ 指数历史K线获取失败")
 
 
 # ──────────────────────────────────────────────
@@ -748,6 +919,38 @@ def fetch_stock_concept(code: str) -> list[str]:
         return []
 
 
+def fetch_announcements(code: str) -> list[dict]:
+    """公告/事件信息，优先尝试 AKShare 可用接口。"""
+    try:
+        import akshare as ak
+        candidates = [
+            ("stock_notice_report", {"symbol": code}),
+            ("stock_zh_a_notice_report", {"symbol": code}),
+        ]
+        for func_name, kwargs in candidates:
+            func = getattr(ak, func_name, None)
+            if not func:
+                continue
+            try:
+                df = func(**kwargs)
+            except TypeError:
+                continue
+            if df is None or df.empty:
+                continue
+            result = []
+            for _, row in df.head(10).iterrows():
+                result.append({
+                    "date": str(row.get("公告日期", row.get("时间", row.get("date", "")))),
+                    "title": str(row.get("公告标题", row.get("标题", row.get("title", "")))),
+                    "type": str(row.get("公告类型", row.get("类型", row.get("type", "")))),
+                })
+            if result:
+                return result
+    except Exception:
+        pass
+    return []
+
+
 # ──────────────────────────────────────────────
 # 统一数据采集入口
 # ──────────────────────────────────────────────
@@ -757,72 +960,92 @@ def collect_all_data(code: str) -> dict:
     统一采集所有分析所需数据，返回结构化数据字典。
     每个子模块独立容错，任一失败不影响整体。
     """
-    result: dict[str, Any] = {"code": code, "fetch_time": datetime.now().isoformat()}
+    result: dict[str, Any] = {
+        "code": code,
+        "fetch_time": datetime.now().isoformat(timespec="seconds"),
+        "_meta": {},
+    }
 
     # 1. 实时行情
     print(f"  [1/10] 采集实时行情...", end="", flush=True)
     rt_map = fetch_realtime([code])
-    result["realtime"] = rt_map.get(code)
-    print("✓")
+    _set_meta(result, "realtime", rt_map.get(code), SOURCE_PRIORITY["realtime"])
+    print(_status_text(result["_meta"]["realtime"]))
 
     # 2. 历史K线（250个交易日）
     print(f"  [2/10] 采集历史K线...", end="", flush=True)
     df = fetch_hist_kline(code, days_back=365)
-    result["kline_df"] = df
-    print("✓" if df is not None else "⚠ 失败")
+    _set_meta(result, "kline_df", df, SOURCE_PRIORITY["kline_df"])
+    print(_status_text(result["_meta"]["kline_df"]))
 
     # 3. 个股基本信息
     print(f"  [3/10] 采集基本信息...", end="", flush=True)
-    result["stock_info"] = fetch_stock_info(code)
-    print("✓" if result["stock_info"] else "⚠ 失败")
+    _set_meta(result, "stock_info", fetch_stock_info(code), SOURCE_PRIORITY["stock_info"])
+    print(_status_text(result["_meta"]["stock_info"]))
 
     # 4. 财务指标
     print(f"  [4/10] 采集财务指标...", end="", flush=True)
-    result["financial_indicator"] = fetch_financial_indicator(code)
-    result["profit_statement"] = fetch_profit_statement(code)
-    result["balance_sheet"] = fetch_balance_sheet(code)
-    result["cashflow"] = fetch_cashflow(code)
-    result["annual_financial"] = fetch_annual_financial(code)
-    print("✓")
+    _set_meta(result, "financial_indicator", fetch_financial_indicator(code), SOURCE_PRIORITY["financial_indicator"])
+    _set_meta(result, "profit_statement", fetch_profit_statement(code), SOURCE_PRIORITY["profit_statement"])
+    _set_meta(result, "balance_sheet", fetch_balance_sheet(code), SOURCE_PRIORITY["balance_sheet"])
+    _set_meta(result, "cashflow", fetch_cashflow(code), SOURCE_PRIORITY["cashflow"])
+    _set_meta(result, "annual_financial", fetch_annual_financial(code), SOURCE_PRIORITY["annual_financial"])
+    financial_ok = any(result["_meta"][k]["success"] for k in ("financial_indicator", "profit_statement", "balance_sheet", "cashflow", "annual_financial"))
+    print("✓" if financial_ok else "⚠ 财务数据全部获取失败")
 
     # 5. 股东治理
     print(f"  [5/10] 采集股东信息...", end="", flush=True)
-    result["top10_holders"] = fetch_top10_holders(code)
-    result["pledge_ratio"] = fetch_pledge_ratio(code)
-    result["holder_num"] = fetch_holder_num(code)
-    result["management_changes"] = fetch_management_changes(code)
-    print("✓")
+    _set_meta(result, "top10_holders", fetch_top10_holders(code), SOURCE_PRIORITY["top10_holders"])
+    _set_meta(result, "pledge_ratio", fetch_pledge_ratio(code), SOURCE_PRIORITY["pledge_ratio"])
+    _set_meta(result, "holder_num", fetch_holder_num(code), SOURCE_PRIORITY["holder_num"])
+    _set_meta(result, "management_changes", fetch_management_changes(code), SOURCE_PRIORITY["management_changes"])
+    governance_ok = any(result["_meta"][k]["success"] for k in ("top10_holders", "pledge_ratio", "holder_num", "management_changes"))
+    print("✓" if governance_ok else "⚠ 股东治理数据获取失败")
 
     # 6. 资金流向
     print(f"  [6/10] 采集资金流向...", end="", flush=True)
-    result["fund_flow"] = fetch_sector_fund_flow(code)
-    print("✓" if result["fund_flow"] else "⚠ 失败")
+    _set_meta(result, "fund_flow", fetch_sector_fund_flow(code), SOURCE_PRIORITY["fund_flow"])
+    print(_status_text(result["_meta"]["fund_flow"]))
 
     # 7. 估值历史
     print(f"  [7/10] 采集估值历史...", end="", flush=True)
-    result["valuation_history"] = fetch_valuation_history(code)
-    print("✓" if result["valuation_history"] else "⚠ 失败")
+    _set_meta(result, "valuation_history", fetch_valuation_history(code), SOURCE_PRIORITY["valuation_history"])
+    print(_status_text(result["_meta"]["valuation_history"]))
 
     # 8. 机构研报与龙虎榜
     print(f"  [8/10] 采集研报与龙虎榜...", end="", flush=True)
-    result["research_reports"] = fetch_research_reports(code)
-    result["analyst_consensus"] = fetch_analyst_consensus(code)
-    result["dragon_tiger"] = fetch_dragon_tiger(code)
-    print("✓")
+    _set_meta(result, "research_reports", fetch_research_reports(code), SOURCE_PRIORITY["research_reports"])
+    _set_meta(result, "analyst_consensus", fetch_analyst_consensus(code), SOURCE_PRIORITY["analyst_consensus"])
+    _set_meta(result, "dragon_tiger", fetch_dragon_tiger(code), SOURCE_PRIORITY["dragon_tiger"])
+    research_ok = any(result["_meta"][k]["success"] for k in ("research_reports", "analyst_consensus", "dragon_tiger"))
+    print("✓" if research_ok else "⚠ 研报/龙虎榜数据获取失败")
 
     # 9. 市场情绪与指数
     print(f"  [9/10] 采集市场情绪...", end="", flush=True)
-    result["market_sentiment"] = fetch_market_sentiment()
-    result["index_data"] = fetch_index_data()
-    print("✓")
+    _set_meta(result, "market_sentiment", fetch_market_sentiment(), SOURCE_PRIORITY["market_sentiment"])
+    _set_meta(result, "index_data", fetch_index_data(), SOURCE_PRIORITY["index_data"])
+    _set_meta(result, "index_history", fetch_all_index_history(), SOURCE_PRIORITY["index_history"])
+    _set_meta(result, "north_fund_flow", fetch_north_fund_flow(), SOURCE_PRIORITY["north_fund_flow"])
+    market_ok = any(result["_meta"][k]["success"] for k in ("market_sentiment", "index_data", "index_history", "north_fund_flow"))
+    print("✓" if market_ok else "⚠ 市场情绪/指数数据获取失败")
 
     # 10. 行业信息
     print(f"  [10/10] 采集行业信息...", end="", flush=True)
     industry = (result.get("stock_info") or {}).get("industry", "")
     if industry:
-        result["industry_peers"] = fetch_industry_rank(industry)[:10]
+        _set_meta(result, "industry_peers", fetch_industry_rank(industry)[:10], SOURCE_PRIORITY["industry_peers"])
     else:
-        result["industry_peers"] = []
-    print("✓")
+        _set_meta(result, "industry_peers", [], SOURCE_PRIORITY["industry_peers"])
+        result["_meta"]["industry_peers"]["message"] = "⚠️ 行业信息缺失，无法采集同行对标"
+    _set_meta(result, "stock_concepts", fetch_stock_concept(code), SOURCE_PRIORITY["stock_concepts"])
+    _set_meta(result, "announcements", fetch_announcements(code), SOURCE_PRIORITY["announcements"])
+    industry_ok = any(result["_meta"][k]["success"] for k in ("industry_peers", "stock_concepts", "announcements"))
+    print("✓" if industry_ok else "⚠ 行业/题材/公告数据获取失败")
+
+    result["data_quality"] = {
+        "success_count": sum(1 for meta in result["_meta"].values() if meta.get("success")),
+        "failure_count": sum(1 for meta in result["_meta"].values() if not meta.get("success")),
+        "failed_sections": [key for key, meta in result["_meta"].items() if not meta.get("success")],
+    }
 
     return result

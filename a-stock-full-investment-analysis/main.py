@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 def run_single(code: str, output: str | None = None) -> str:
     """执行单股全维度分析，返回 HTML 报告路径"""
     from data_collector import collect_all_data
+    from analyzers.base import ModuleResult
     from analyzers.m01_business import analyze_business
     from analyzers.m02_financial import analyze_financial
     from analyzers.m03_governance import analyze_governance
@@ -50,6 +51,7 @@ def run_single(code: str, output: str | None = None) -> str:
 
     print(f"\n[Step 2/3] 16大模块分析中...")
     module_results = {}
+    analysis_errors = []
 
     analyzers = [
         ("M01", analyze_business),
@@ -78,6 +80,15 @@ def run_single(code: str, output: str | None = None) -> str:
             score = module_results[mid].score
             print(f"  {mid} ✓ ({score:.1f}/10)")
         except Exception as e:
+            analysis_errors.append(f"{mid}: {e}")
+            module_results[mid] = ModuleResult(
+                module_id=mid,
+                module_name=f"{mid} 模块异常",
+                score=1.0,
+                stars=1,
+                key_findings=[f"⚠️ {mid} 分析异常：{e}"],
+                conclusion="模块执行异常，结果已降级，请复核上游数据与模块逻辑。",
+            )
             print(f"  {mid} ⚠ 分析异常: {e}")
 
     # M16 综合总结
@@ -89,6 +100,18 @@ def run_single(code: str, output: str | None = None) -> str:
         print(f"  M16 ✓ 综合评分: {total:.1f}/100 {'★'*stars} {rating}")
     except Exception as e:
         print(f"  M16 ⚠ 综合评分异常: {e}")
+        analysis_errors.append(f"M16: {e}")
+
+    if analysis_errors:
+        data["analysis_audit"] = {
+            "degraded": True,
+            "errors": analysis_errors,
+        }
+        print("\n[审计] 本次报告以降级模式生成：")
+        for item in analysis_errors:
+            print(f"  - {item}")
+    else:
+        data["analysis_audit"] = {"degraded": False, "errors": []}
 
     print(f"\n[Step 3/3] 生成 HTML 报告...")
 
@@ -171,7 +194,7 @@ def run_multi(codes: list[str]) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="A股机构级全维度股票投资分析报告生成技能 v3.5.0",
+        description="A股机构级全维度股票投资分析报告生成技能 v4.0.0",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
