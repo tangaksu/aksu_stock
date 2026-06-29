@@ -179,9 +179,10 @@ def _extract_payload(payload: Any) -> tuple[Any, str | None, str | None, bool]:
     """拆出 payload 与元信息。"""
     if isinstance(payload, dict) and "_source" in payload:
         plain = {k: v for k, v in payload.items() if not k.startswith("_")}
+        # 若非字典型 payload（如 DataFrame/列表）被 _with_meta 包装，非下划线键只有 "data" 一个
+        if set(plain.keys()) == {"data"}:
+            return plain["data"], payload.get("_source"), payload.get("_message"), bool(payload.get("_success", True))
         return plain, payload.get("_source"), payload.get("_message"), bool(payload.get("_success", True))
-    if isinstance(payload, dict) and {"data", "_source", "_fetched_at"} <= set(payload.keys()):
-        return payload.get("data"), payload.get("_source"), payload.get("_message"), bool(payload.get("_success", True))
     return payload, None, None, bool(payload)
 
 

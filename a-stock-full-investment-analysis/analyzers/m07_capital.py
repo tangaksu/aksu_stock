@@ -86,7 +86,7 @@ def analyze_capital(data: dict) -> ModuleResult:
         if total_30d is not None:
             findings.append(f"近30日主力累计净流入：{yi(total_30d)}")
 
-        # 连续流向趋势判断
+        # 连续流向趋势判断（recent5_nets[0] 为最新一日，从最新向前累计连续方向）
         recent5_nets = [_get_main_net(r) for r in recent5_rows]
         inflow_days = sum(1 for n in recent5_nets if n > 0)
         outflow_days = sum(1 for n in recent5_nets if n < 0)
@@ -94,13 +94,15 @@ def analyze_capital(data: dict) -> ModuleResult:
         outflow_streak = 0
         for net in recent5_nets:
             if net > 0:
+                if outflow_streak > 0:
+                    break
                 inflow_streak += 1
-                outflow_streak = 0
             elif net < 0:
+                if inflow_streak > 0:
+                    break
                 outflow_streak += 1
-                inflow_streak = 0
             else:
-                inflow_streak = outflow_streak = 0
+                break
         findings.append(f"近5日中：净流入 {inflow_days} 天，净流出 {outflow_days} 天，当前连续净流入 {inflow_streak} 天 / 连续净流出 {outflow_streak} 天")
 
         if total_5d > 0:
