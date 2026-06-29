@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import json
+import socket
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from typing import Any
@@ -25,7 +27,7 @@ USER_AGENT = (
     "Chrome/120.0.0.0 Safari/537.36"
 )
 SOURCE_PRIORITY = {
-    "realtime": ["东方财富/AKShare", "新浪财经", "腾讯财经"],
+    "realtime": ["腾讯财经", "新浪财经", "东方财富/AKShare"],
     "kline_df": ["AKShare", "腾讯财经"],
     "stock_info": ["AKShare"],
     "financial_indicator": ["AKShare"],
@@ -51,6 +53,13 @@ SOURCE_PRIORITY = {
     "industry_peers": ["AKShare"],
 }
 
+AKSHARE_INSTALL_HINT = "AKShare 未安装，请先执行 pip install -r requirements.txt"
+TENCENT_REALTIME_HOSTS = ["qt.gtimg.cn", "sqt.gtimg.cn"]
+
+_AKSHARE_MODULE = None
+_AKSHARE_IMPORT_ERROR: str | None = None
+_AKSHARE_IMPORT_CHECKED = False
+
 
 def _tencent_prefix(code: str) -> str:
     """6位代码转腾讯前缀: 60xx/68xx/90xx → sh，其余 → sz"""
@@ -70,6 +79,81 @@ def _safe_float(v: Any, default: float | None = None) -> float | None:
         return result
     except (TypeError, ValueError):
         return default
+
+
+def _format_fetch_error(exc: Exception, source: str, host: str | None = None) -> str:
+    """统一格式化依赖、DNS、超时等采集错误。"""
+    if isinstance(exc, ModuleNotFoundError) and getattr(exc, "name", "") == "akshare":
+        return AKSHARE_INSTALL_HINT
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        if isinstance(reason, socket.gaierror):
+            return f"DNS 解析失败，无法访问 {host or source}"
+        if isinstance(reason, TimeoutError):
+            return f"{source} 请求超时"
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return f"{source} 请求超时"
+    text = str(exc).strip()
+    return f"{source} 异常：{text or type(exc).__name__}"
+
+
+def _merge_messages(messages: list[str]) -> str:
+    unique: list[str] = []
+    for msg in messages:
+        text = (msg or "").strip()
+        if text and text not in unique:
+            unique.append(text)
+    return "；".join(unique) if unique else "⚠️ 数据获取失败（上游接口未返回有效内容）"
+
+
+def _failure_payload(source: str, message: str, payload: Any = None) -> Any:
+    return _with_meta(payload if payload is not None else {}, source, success=False, message=message)
+
+
+def _get_akshare():
+    global _AKSHARE_MODULE, _AKSHARE_IMPORT_ERROR, _AKSHARE_IMPORT_CHECKED
+    if _AKSHARE_IMPORT_CHECKED:
+        return _AKSHARE_MODULE
+    _AKSHARE_IMPORT_CHECKED = True
+    try:
+        import akshare as ak  # type: ignore
+
+        _AKSHARE_MODULE = ak
+    except Exception as exc:  # pragma: no cover - depends on runtime environment
+        _AKSHARE_MODULE = None
+        _AKSHARE_IMPORT_ERROR = _format_fetch_error(exc, "AKShare")
+    return _AKSHARE_MODULE
+
+
+def _akshare_error_message(scene: str) -> str:
+    return _AKSHARE_IMPORT_ERROR or f"AKShare {scene} 不可用"
+
+
+def _probe_host(host: str) -> tuple[bool, str]:
+    try:
+        socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        return True, f"{host} 可解析"
+    except Exception as exc:
+        return False, _format_fetch_error(exc, host, host)
+
+
+def runtime_diagnostics() -> dict[str, Any]:
+    checks = {
+        "akshare_ready": _get_akshare() is not None,
+        "akshare_message": "AKShare 可用" if _AKSHARE_MODULE is not None else _akshare_error_message("运行环境"),
+    }
+    hosts = {}
+    blockers: list[str] = []
+    for host in ["qt.gtimg.cn", "hq.sinajs.cn", "web.ifzq.gtimg.cn"]:
+        ok, message = _probe_host(host)
+        hosts[host] = {"ok": ok, "message": message}
+        if not ok:
+            blockers.append(message)
+    if not checks["akshare_ready"]:
+        blockers.append(checks["akshare_message"])
+    checks["hosts"] = hosts
+    checks["blockers"] = blockers
+    return checks
 
 
 def _with_meta(payload: Any, source: str, success: bool = True, message: str = "") -> Any:
