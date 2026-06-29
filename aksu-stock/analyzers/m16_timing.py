@@ -9,6 +9,7 @@ M16 — 现价交易择时评分（独立100分制）
   维度5 交易盈亏比风险    10分（盈亏比6+短期风险4）
 """
 from __future__ import annotations
+from datetime import datetime
 from analyzers.base import ModuleResult, safe_float, pct_str, fmt_number
 
 
@@ -313,7 +314,6 @@ def analyze_timing(data: dict) -> ModuleResult:
     dim_detail["个股辨识度"] = round(d4_identify, 1)
 
     # 近期催化窗口（4分）
-    from datetime import datetime
     month = datetime.now().month
     d4_catalyst = 2.0
     if month in [1, 2, 3, 4, 7, 8, 10]:

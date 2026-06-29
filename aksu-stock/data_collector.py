@@ -96,7 +96,7 @@ def _tencent_prefix(code: str) -> str:
 
 def _safe_float(v: Any, default: float | None = None) -> float | None:
     try:
-        if v in (None, "", "—", "N/A", "0.00", "0"):
+        if v in (None, "", "—", "N/A"):
             return default
         result = float(v)
         if math.isnan(result) or math.isinf(result):

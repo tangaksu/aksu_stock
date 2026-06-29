@@ -446,7 +446,7 @@ def _render_m17_card(r: Any) -> str:
     <div class="summary-params">
       <div class="summary-param">
         <div class="sp-label">最优入场区间</div>
-        <div class="sp-value">{_fmt(d.get('stop_loss') and d['stop_loss']*1.005, 2)} ~ {_fmt(d.get('stop_loss') and d['stop_loss']*1.025, 2)}</div>
+        <div class="sp-value">{_fmt(d['stop_loss']*1.005 if d.get('stop_loss') is not None else None, 2)} ~ {_fmt(d['stop_loss']*1.025 if d.get('stop_loss') is not None else None, 2)}</div>
       </div>
       <div class="summary-param">
         <div class="sp-label">强制止损位</div>

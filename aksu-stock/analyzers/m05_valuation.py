@@ -46,7 +46,8 @@ def analyze_valuation(data: dict) -> ModuleResult:
 
     if pb is not None:
         if pb < 1:
-            findings.append(f"PB {fmt_number(pb, 2)}x，破净标的，静态估值低廉")
+            # 破净可能是深度低估，也可能反映资产减值或负净资产问题，需结合其他指标综合判断
+            findings.append(f"PB {fmt_number(pb, 2)}x，破净标的，静态估值低廉（注意排查资产质量风险）")
             score_safety = min(score_safety + 0.3, 3.0)
         elif pb < 2:
             findings.append(f"PB {fmt_number(pb, 2)}x，市净率合理")

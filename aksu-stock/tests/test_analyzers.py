@@ -183,9 +183,10 @@ def _assert_module_result(tc: unittest.TestCase, r: ModuleResult, mid: str):
     tc.assertIsInstance(r, ModuleResult, f"{mid}: 应返回 ModuleResult")
     tc.assertGreaterEqual(r.score, 1.0, f"{mid}: score >= 1")
     tc.assertLessEqual(r.score, 10.0, f"{mid}: score <= 10")
-    tc.assertIn(r.stars, range(1, 6), f"{mid}: stars in [1,5]")
+    tc.assertIn(r.stars, range(1, 6), f"{mid}: stars in [1,5]")  # keep for backward compat
     tc.assertIsInstance(r.key_findings, list, f"{mid}: key_findings 应为 list")
     tc.assertTrue(r.conclusion, f"{mid}: conclusion 不能为空")
+    tc.assertTrue(1 <= r.stars <= 5, f"{mid}: stars 应在 [1,5]")
 
 
 # ─────────────────────────────────────────────────────────
