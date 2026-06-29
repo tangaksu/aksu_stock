@@ -64,7 +64,8 @@ def _calc_kdj(highs: list[float], lows: list[float], closes: list[float], period
 def _sample_period(closes: list[float], step: int) -> list[float]:
     if not closes:
         return []
-    sampled = [closes[idx] for idx in range(step - 1, len(closes), step)]
+    start = (len(closes) - 1) % step
+    sampled = [closes[idx] for idx in range(start, len(closes), step)]
     if sampled and sampled[-1] != closes[-1]:
         sampled.append(closes[-1])
     elif not sampled:

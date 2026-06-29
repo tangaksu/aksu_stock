@@ -6,7 +6,9 @@ from .base import ModuleResult, score_to_stars, fmt
 
 def _safe_date(raw) -> datetime | None:
     try:
-        return datetime.strptime(str(raw)[:10].replace("/", "-"), "%Y-%m-%d")
+        text = str(raw)
+        normalized = text[:10] if len(text) >= 10 else text
+        return datetime.strptime(normalized.replace("/", "-"), "%Y-%m-%d")
     except Exception:
         return None
 

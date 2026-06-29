@@ -710,8 +710,9 @@ def fetch_research_reports(code: str) -> list[dict]:
         result = []
         for _, row in df.iterrows():
             raw_date = str(row.get("发布日期", ""))
+            normalized_date = raw_date[:10] if len(raw_date) >= 10 else raw_date
             try:
-                report_date = datetime.strptime(raw_date[:10].replace("/", "-"), "%Y-%m-%d")
+                report_date = datetime.strptime(normalized_date.replace("/", "-"), "%Y-%m-%d")
             except Exception:
                 report_date = None
             if report_date and report_date < cutoff:

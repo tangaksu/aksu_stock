@@ -7,6 +7,7 @@ from datetime import datetime
 from analyzers.base import DATA_MISSING_TEXT
 
 SKILL_VERSION = "v4.0.0"
+UI_MISSING_TEXT = "缺失"
 
 
 def _score_color(score: float, mode: str = "100") -> str:
@@ -223,7 +224,7 @@ def generate_report(data: dict, module_results: dict) -> str:
       <div style="font-size:0.8em;opacity:0.8;margin-bottom:6px">📊 行情速览</div>
       <div style="font-size:1.3em;font-weight:700">{price:.2f} 元</div>
       <div style="font-size:0.9em;color:{"#4ade80" if pct > 0 else "#f87171"}">{pct:+.2f}%</div>
-      <div style="font-size:0.8em;opacity:0.75;margin-top:4px">MA10:{ma10 if ma10 is not None else DATA_MISSING_TEXT} | MA20:{ma20 if ma20 is not None else DATA_MISSING_TEXT}</div>
+      <div style="font-size:0.8em;opacity:0.75;margin-top:4px">MA10:{ma10 if ma10 is not None else UI_MISSING_TEXT} | MA20:{ma20 if ma20 is not None else UI_MISSING_TEXT}</div>
     </div>
     <div style="background:rgba(255,255,255,0.1);border-radius:8px;padding:12px">
       <div style="font-size:0.8em;opacity:0.8;margin-bottom:6px">📅 三周期评级</div>
